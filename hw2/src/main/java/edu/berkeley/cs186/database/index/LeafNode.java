@@ -9,9 +9,13 @@ import java.util.Optional;
 
 import edu.berkeley.cs186.database.common.Pair;
 import edu.berkeley.cs186.database.databox.DataBox;
+import edu.berkeley.cs186.database.databox.IntDataBox;
 import edu.berkeley.cs186.database.databox.Type;
 import edu.berkeley.cs186.database.io.Page;
 import edu.berkeley.cs186.database.table.RecordId;
+
+import javax.swing.text.html.Option;
+import javax.xml.crypto.Data;
 
 /**
  * A leaf of a B+ tree. Every leaf in a B+ tree of order d stores between d and
@@ -132,20 +136,55 @@ class LeafNode extends BPlusNode {
   // See BPlusNode.get.
   @Override
   public LeafNode get(DataBox key) {
-    throw new UnsupportedOperationException("TODO(hw2): implement.");
+    return this;
   }
 
   // See BPlusNode.getLeftmostLeaf.
   @Override
   public LeafNode getLeftmostLeaf() {
-    throw new UnsupportedOperationException("TODO(hw2): implement.");
+    return this;
   }
 
   // See BPlusNode.put.
   @Override
   public Optional<Pair<DataBox, Integer>> put(DataBox key, RecordId rid)
       throws BPlusTreeException {
-    throw new UnsupportedOperationException("TODO(hw2): implement.");
+
+    if (key == null || rid == null) {
+      return Optional.empty();
+    }
+    boolean added = false;
+
+    for (int i = 0; i < keys.size(); i ++) {
+      if (key.equals(keys.get(i))){
+        throw new BPlusTreeException("duplicate key");
+      }
+      else if (key.compareTo(keys.get(i)) < 0){
+        keys.add(i, key);
+        rids.add(i, rid);
+        added = true;
+        break;
+
+      }
+    }
+    if (!added) {
+      keys.add(key);
+      rids.add(rid);
+    }
+    if (metadata.getOrder() * 2 >= keys.size()) {
+      sync();
+      return Optional.empty();
+    }
+    List<DataBox> newKeys = new ArrayList<>();
+    List<RecordId> newRids = new ArrayList<>();
+    for (int i = 0; i <= metadata.getOrder(); i ++) {
+      newKeys.add(keys.remove(metadata.getOrder()));
+      newRids.add(rids.remove(metadata.getOrder()));
+    }
+    LeafNode newLeaf = new LeafNode(metadata, newKeys, newRids, rightSibling);
+    this.rightSibling = Optional.of(newLeaf.getPage().getPageNum());
+    sync();
+    return Optional.of(new Pair(newKeys.get(0), newLeaf.getPage().getPageNum()));
   }
 
   // See BPlusNode.bulkLoad.
@@ -153,13 +192,35 @@ class LeafNode extends BPlusNode {
   public Optional<Pair<DataBox, Integer>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
                                                    float fillFactor)
       throws BPlusTreeException {
-    throw new UnsupportedOperationException("TODO(hw2): implement.");
+    int inserted = getRids().size();
+
+    while(data.hasNext()) {
+      Pair<DataBox, RecordId> p = data.next();
+      put(p.getFirst(), p.getSecond());
+      inserted += 1;
+      if (inserted > Math.ceil(fillFactor*metadata.getOrder()*2)) {
+        //creating the sibling after fill the current leaf
+        LeafNode newLeaf = new LeafNode(metadata, new ArrayList<>(), new ArrayList<>(), Optional.empty());
+        newLeaf.put(getKeys().remove(getKeys().size() - 1), getRids().remove(getRids().size() - 1));
+        rightSibling = Optional.of(newLeaf.getPage().getPageNum());
+        sync();
+        return Optional.of(new Pair<>(newLeaf.getKeys().get(0), newLeaf.getPage().getPageNum()));
+      }
+    }
+
+    return Optional.empty();
   }
 
   // See BPlusNode.remove.
   @Override
   public void remove(DataBox key) {
-    throw new UnsupportedOperationException("TODO(hw2): implement.");
+    for (int i = 0; i < keys.size(); i ++) {
+      if (key.equals(keys.get(i))) {
+        getKeys().remove(i);
+        getRids().remove(i);
+        sync();
+      }
+    }
   }
 
   // Iterators /////////////////////////////////////////////////////////////////
@@ -335,7 +396,25 @@ class LeafNode extends BPlusNode {
    * meta.getAllocator().
    */
   public static LeafNode fromBytes(BPlusTreeMetadata metadata, int pageNum) {
-    throw new UnsupportedOperationException("TODO(hw2): implement.");
+    Page page = metadata.getAllocator().fetchPage(pageNum);
+    ByteBuffer bytes = page.getByteBuffer();
+    //byte[] isLeaf = new byte[1];
+    bytes.get();
+    int sibling = bytes.getInt();
+    int keylen = bytes.getInt();
+    List<DataBox> keys = new ArrayList<>();
+    List<RecordId> rids = new ArrayList<>();
+
+    for (int i = 0; i < keylen; i ++){
+      keys.add(IntDataBox.fromBytes(bytes, Type.intType()));
+      rids.add(RecordId.fromBytes(bytes));
+    }
+
+    if (sibling == -1) {
+      return new LeafNode(metadata, pageNum, keys, rids, Optional.empty());
+    }
+
+    return new LeafNode(metadata, pageNum, keys, rids, Optional.of(sibling));
   }
 
   // Builtins //////////////////////////////////////////////////////////////////
